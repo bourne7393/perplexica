@@ -25,8 +25,11 @@ const useSocket = (
   url: string,
   setIsWSReady: (ready: boolean) => void,
   setError: (error: boolean) => void,
+  hasError: boolean
 ) => {
   const [ws, setWs] = useState<WebSocket | null>(null);
+  const reconnectTimeout = useRef(0);
+  const reconnectAttempts = useRef(0);
 
   useEffect(() => {
     if (!ws) {
@@ -171,6 +174,8 @@ const useSocket = (
 
         ws.onopen = () => {
           console.log('[DEBUG] open');
+	  reconnectTimeout.current = 0;
+	  reconnectAttempts.current = 0;
           clearTimeout(timeoutId);
           setIsWSReady(true);
         };
@@ -183,7 +188,9 @@ const useSocket = (
 
         ws.onclose = () => {
           clearTimeout(timeoutId);
-          setError(true);
+          if (!hasError && reconnectAttempts.current < 3) {
+            setWs(null); // forces websocket to reopen when needed.
+          }
           console.log('[DEBUG] closed');
         };
 
@@ -197,7 +204,15 @@ const useSocket = (
         setWs(ws);
       };
 
-      connectWs();
+      if (reconnectAttempts.current < 3) {
+	console.log(`[DEBUG] Attempting to reconnect (${reconnectAttempts.current + 1}/3)`);
+	setTimeout(connectWs, reconnectTimeout.current);
+	reconnectTimeout.current = reconnectTimeout.current > 0 ? reconnectTimeout.current * 2 : 1000;
+	reconnectAttempts.current += 1;
+      } else {
+	console.log('[DEBUG] WebSocket reconnect failure after 3 retries');
+	setError(true);
+      }
     }
 
     return () => {
@@ -274,6 +289,7 @@ const ChatWindow = ({ id }: { id?: string }) => {
     process.env.NEXT_PUBLIC_WS_URL!,
     setIsWSReady,
     setHasError,
+    hasError
   );
 
   const [loading, setLoading] = useState(false);
